@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Can you time the market? An S&amp;P 500 moving-average backtest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F6F4EF; --surface:#FFFFFF; --ink:#1D1F24; --muted:#5E6169; --line:#DEDAD0;
+  --hold:#1B6F6A; --ma:#C4572B; --price:#8A8D94; --out:rgba(196,87,43,0.10);
+  --good:#1B6F6A; --bad:#B23A2B;
+  color-scheme:light; box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171B; --surface:#1E2126; --ink:#ECEAE4; --muted:#A3A5AB; --line:#33363D;
+    --hold:#5CC2B8; --ma:#F08A5D; --price:#7C7F86; --out:rgba(240,138,93,0.13);
+    --good:#5CC2B8; --bad:#F2846F; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171B; --surface:#1E2126; --ink:#ECEAE4; --muted:#A3A5AB; --line:#33363D;
+  --hold:#5CC2B8; --ma:#F08A5D; --price:#7C7F86; --out:rgba(240,138,93,0.13);
+  --good:#5CC2B8; --bad:#F2846F; color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Source Sans 3",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:17px;line-height:1.55;font-variant-numeric:tabular-nums}
+.wrap{max-width:900px;margin:0 auto;padding:32px 20px 64px}
+h1,h2{font-family:"Source Serif 4",Georgia,"Times New Roman",serif;line-height:1.15;margin:0;font-weight:700}
+h1{font-size:clamp(2rem,5.5vw,3.1rem);letter-spacing:-0.01em;max-width:18ch}
+h2{font-size:1.35rem;margin-bottom:10px}
+p{margin:0 0 .85em;max-width:68ch}
+.lede{color:var(--muted);font-size:1.08rem;margin-top:12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:18px}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px 18px}
+label{display:block;font-weight:600;font-size:.92rem;margin-bottom:4px}
+label small{font-weight:400;color:var(--muted)}
+select,input[type=number]{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+input[type=range]{width:100%;accent-color:var(--ma)}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+button{font:inherit;font-size:.92rem;font-weight:600;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer}
+button[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--ma);outline-offset:2px}
+.verdict{font-family:"Source Serif 4",Georgia,serif;font-size:clamp(1.2rem,3vw,1.55rem);font-weight:600;margin:4px 0 2px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:14px;border-top:1px solid var(--line)}
+.stat{padding:12px 0;border-bottom:1px solid var(--line)}
+.stat:nth-child(odd){padding-right:14px}
+.stat span{display:block;color:var(--muted);font-size:.88rem}
+.stat b{font-size:1.15rem;font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:.9rem;color:var(--muted);margin:4px 0 8px}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.legend .box{height:12px;width:14px;background:var(--out);border-radius:2px}
+.chartwrap{position:relative}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:.82rem;padding:6px 9px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-110%);display:none}
+.toggle{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted);margin-top:8px}
+.note{color:var(--muted);font-size:.92rem}
+footer{margin-top:28px;color:var(--muted);font-size:.9rem}
+@media (max-width:560px){.stats{grid-template-columns:1fr}.stat:nth-child(odd){padding-right:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Can you time the market?</h1>
+    <p class="lede">A moving-average strategy tries to dodge crashes by selling when the S&amp;P 500 falls below its recent average, and buying back when it recovers. Test it against simply buying and holding, over any period since 1871.</p>
+  </header>
+
+  <section class="panel" aria-label="Backtest settings">
+    <div class="controls">
+      <div><label for="startY">From</label><select id="startY"></select></div>
+      <div><label for="endY">To</label><select id="endY"></select></div>
+      <div><label for="win">Moving average <small id="winOut">10 months</small></label><input id="win" type="range" min="2" max="24" step="1" value="10"></div>
+      <div><label for="cash">Interest on cash <small>% a year</small></label><input id="cash" type="number" min="0" max="15" step="0.5" value="0"></div>
+      <div><label for="cost">Cost per trade <small>%</small></label><input id="cost" type="number" min="0" max="2" step="0.05" value="0.1"></div>
+    </div>
+    <div class="presets" role="group" aria-label="Preset periods">
+      <button data-p="2016,2026" aria-pressed="true">Last 10 years</button>
+      <button data-p="2000,2009">Dot-com and 2008</button>
+      <button data-p="2007,2009">Financial crisis</button>
+      <button data-p="2010,2019">2010s bull market</button>
+      <button data-p="1950,2026">Since 1950</button>
+      <button data-p="1871,2026">Everything</button>
+    </div>
+  </section>
+
+  <section class="panel" aria-live="polite">
+    <p class="verdict" id="verdict"></p>
+    <p class="note" id="sub"></p>
+    <div class="legend">
+      <span><i style="background:var(--hold)"></i>Buy and hold</span>
+      <span><i style="background:var(--ma)"></i>Moving-average strategy</span>
+      <span><i class="box"></i>Strategy out of the market</span>
+    </div>
+    <div class="chartwrap" id="chartwrap">
+      <svg id="chart" viewBox="0 0 860 360" role="img" aria-label="Growth of £10,000 under each strategy"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="logScale"> Log scale (better for long periods)</label>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section class="panel">
+    <h2>How it works</h2>
+    <p>At the end of each month, the strategy compares the S&amp;P 500 with its average over the last few months. If the index is above the average, it stays invested for the next month. If it’s below, it sells and holds cash. Each switch pays the trading cost you set.</p>
+    <p>The catch is the <strong>lag</strong>. An average of past prices only turns after the market already has, so the strategy often sells after a fall and buys back after the rebound has started. In steady bull markets that costs a lot. In long crashes, like 2000–2002 or 2008, it can save a lot. Try the presets to see both.</p>
+    <p class="note">Data: monthly average S&amp;P 500 prices from Robert Shiller’s dataset, via the DataHub <em>s-and-p-500</em> package, January 1871 to September 2026. Returns are price-only (no dividends), which understates buy and hold, especially over long periods. Using monthly averages rather than month-end prices smooths the series a little. This is an educational model, not investment advice.</p>
+  </section>
+
+  <footer>A project by Adarsh Koti.</footer>
+</div>
+
+<script>
+const START=[1871,1];const PX=[4.44,4.5,4.61,4.74,4.86,4.82,4.73,4.79,4.84,4.59,4.64,4.74,4.86,4.88,5.04,5.18,5.18,5.13,5.1,5.04,4.95,4.97,4.95,5.07,5.11,5.15,5.11,5.04,5.05,4.98,4.97,4.97,4.59,4.19,4.04,4.42,4.66,4.8,4.73,4.6,4.48,4.46,4.46,4.47,4.54,4.53,4.57,4.54,4.54,4.53,4.59,4.65,4.47,4.38,4.39,4.41,4.37,4.3,4.37,4.37,4.46,4.52,4.51,4.34,4.18,4.15,4.1,3.93,3.69,3.67,3.6,3.58,3.55,3.34,3.17,2.94,2.94,2.73,2.85,3.05,3.24,3.31,3.26,3.25,3.25,3.18,3.24,3.33,3.34,3.41,3.48,3.45,3.52,3.48,3.47,3.45,3.58,3.71,3.65,3.77,3.94,3.96,4.04,4.07,4.22,4.68,4.93,4.92,5.11,5.2,5.3,5.18,4.77,4.79,5.01,5.19,5.18,5.33,5.61,5.84,6.19,6.17,6.24,6.22,6.5,6.58,6.35,6.2,6.25,6.15,6.19,6.01,5.92,5.79,5.78,5.78,5.71,5.68,6.0,6.18,6.24,6.07,5.81,5.84,5.81,5.68,5.75,5.87,5.77,5.82,5.73,5.47,5.53,5.38,5.46,5.34,5.18,5.32,5.3,5.06,4.65,4.46,4.46,4.74,4.59,4.44,4.35,4.34,4.24,4.37,4.38,4.37,4.32,4.3,4.46,4.71,4.65,4.92,5.24,5.2,5.2,5.3,5.19,5.12,5.02,5.25,5.33,5.37,5.51,5.65,5.79,5.64,5.58,5.54,5.67,5.8,5.9,5.73,5.59,5.45,5.38,5.2,5.3,5.27,5.31,5.28,5.08,5.1,5.17,5.01,5.14,5.25,5.38,5.35,5.24,5.14,5.24,5.3,5.19,5.18,5.32,5.41,5.3,5.37,5.5,5.4,5.35,5.32,5.38,5.32,5.28,5.39,5.62,5.58,5.54,5.41,5.32,5.08,4.71,4.6,4.84,4.9,4.81,4.97,4.95,4.85,4.77,4.93,5.33,5.33,5.25,5.41,5.51,5.52,5.58,5.57,5.57,5.54,5.54,5.62,5.48,5.59,5.57,5.51,5.61,5.51,5.31,5.31,4.84,4.61,4.18,4.08,4.37,4.5,4.57,4.41,4.32,4.38,4.51,4.57,4.4,4.34,4.25,4.41,4.48,4.34,4.34,4.3,4.25,4.19,4.19,4.37,4.61,4.7,4.72,4.79,4.82,4.75,4.59,4.32,4.27,4.45,4.38,4.42,4.4,4.32,4.04,3.81,4.01,4.1,4.38,4.22,4.22,4.18,4.19,4.06,4.08,4.27,4.46,4.75,4.98,4.82,4.65,4.75,4.88,4.87,4.65,4.57,4.87,5.06,5.08,5.27,5.26,5.15,5.32,5.65,6.08,6.31,6.4,6.48,6.21,6.07,6.28,6.44,6.37,6.34,6.46,6.02,6.1,6.21,6.26,6.34,6.04,5.86,5.86,5.94,5.8,6.01,6.48,6.87,7.07,7.25,7.51,8.14,7.73,8.5,7.93,8.04,8.0,7.91,8.08,7.95,8.12,8.19,8.2,8.48,8.46,8.41,8.6,8.83,8.85,8.57,8.24,8.05,8.46,8.41,8.08,7.75,7.6,7.18,6.85,6.63,6.47,6.26,6.28,6.57,6.68,6.5,6.48,6.64,6.5,6.51,6.78,7.01,7.32,7.75,8.17,8.25,8.43,8.8,9.05,8.94,8.5,8.6,8.87,9.2,9.23,9.36,9.31,9.54,9.87,9.8,9.56,9.43,9.18,9.3,9.06,9.73,10.03,9.73,9.93,9.84,9.56,9.26,8.35,8.39,8.1,7.84,8.14,7.53,7.45,6.64,6.25,6.57,6.85,6.6,6.87,7.24,7.63,7.64,7.92,8.26,8.17,8.27,8.83,9.03,9.06,8.8,8.92,9.32,9.63,9.8,9.94,10.18,10.19,10.23,10.18,10.3,10.08,9.72,9.96,9.72,9.56,9.1,8.64,8.85,8.91,9.32,9.31,9.05,9.27,9.43,9.32,9.28,9.48,9.67,9.63,9.17,8.67,8.72,9.07,9.11,9.12,9.04,9.3,9.59,9.58,9.58,9.59,9.81,9.86,9.84,9.73,9.38,9.3,8.97,8.8,8.79,8.55,8.12,8.23,8.45,8.53,8.26,8.05,8.04,8.37,8.48,8.32,8.12,8.17,8.13,7.68,7.68,7.68,7.68,7.68,7.35,7.48,7.38,7.57,8.14,7.95,8.04,8.01,8.35,8.66,9.14,9.46,9.48,9.33,9.2,9.17,9.07,9.27,9.36,9.23,9.3,9.68,9.98,10.21,9.8,9.57,9.03,9.31,9.17,8.86,9.04,8.79,8.53,8.12,7.68,7.04,6.8,7.21,7.43,7.28,7.21,7.44,7.45,7.51,7.58,7.54,7.86,8.06,7.9,7.85,7.88,8.12,8.39,8.97,9.21,9.51,8.87,9.01,9.47,9.19,8.92,8.83,8.1,8.67,8.6,8.06,7.92,7.91,7.6,7.87,7.88,7.48,6.81,7.11,7.06,6.88,6.91,7.12,6.55,6.53,6.45,6.61,6.7,7.06,7.31,7.3,7.46,7.74,8.21,8.53,8.45,8.51,8.83,9.06,9.26,8.8,8.78,8.9,9.28,9.43,9.1,8.67,8.34,8.06,8.1,8.15,8.03,8.27,8.55,8.83,8.87,8.7,8.5,8.47,8.63,9.03,9.34,9.25,9.13,9.64,10.16,10.58,10.67,10.39,10.28,10.61,10.8,11.1,11.25,11.51,11.89,12.26,12.46,12.65,12.67,11.81,11.48,11.56,12.11,12.62,13.12,13.32,13.02,13.19,13.49,13.4,13.66,13.87,14.21,14.7,14.89,15.22,16.03,16.94,16.68,17.06,17.46,17.53,17.32,18.25,19.4,20.0,19.02,19.16,19.78,21.17,21.6,23.06,23.15,24.86,24.99,25.43,25.28,25.66,26.15,28.48,30.1,31.3,27.99,20.58,21.4,21.71,23.07,23.94,25.46,23.94,21.52,21.06,20.79,20.78,17.92,16.62,15.51,15.98,17.2,17.53,15.86,14.33,13.87,14.33,13.9,11.83,10.25,10.39,8.44,8.3,8.23,8.26,6.28,5.51,4.77,5.01,7.53,8.26,7.12,7.05,6.82,7.09,6.25,6.23,6.89,8.87,10.39,11.23,10.67,10.58,9.55,9.78,9.97,10.54,11.32,10.74,10.92,9.81,9.94,9.47,9.1,8.88,8.95,9.2,9.26,9.26,8.98,8.41,9.04,9.75,10.12,10.65,11.37,11.61,11.92,13.04,13.04,13.76,14.55,14.86,14.88,14.09,14.69,15.56,15.87,16.05,16.89,17.36,17.06,17.59,18.11,18.09,17.01,16.25,15.64,16.57,16.74,14.37,12.28,11.2,11.02,11.31,11.04,10.31,9.89,9.98,10.21,12.24,12.31,11.75,13.06,13.07,12.69,12.5,12.4,12.39,10.83,11.23,11.43,11.71,11.54,12.77,12.9,12.67,12.37,12.3,12.22,12.15,12.27,10.58,9.67,9.99,10.2,10.63,10.73,10.98,10.53,10.55,9.89,9.95,9.64,9.43,9.76,10.26,10.21,10.24,9.83,9.37,8.76,8.93,8.65,8.18,7.84,7.93,8.33,8.64,8.59,8.68,9.32,9.47,9.52,10.09,10.69,11.07,11.44,11.89,12.1,12.35,11.74,11.99,11.88,11.33,11.48,11.85,11.77,12.1,11.89,12.1,12.67,13.0,12.81,12.6,12.91,12.82,13.1,13.49,13.94,13.93,14.28,14.82,15.09,14.78,14.83,15.84,16.5,17.04,17.33,18.02,18.07,17.53,18.66,18.7,18.58,18.05,17.7,15.09,14.75,14.69,15.13,15.21,15.8,15.16,14.6,14.34,14.84,15.77,15.46,15.06,15.45,15.27,15.03,14.83,14.1,14.3,15.4,16.15,16.82,16.42,15.94,15.76,16.19,15.29,15.19,15.36,14.77,14.91,14.89,14.78,13.97,14.76,15.29,15.49,15.89,16.11,16.54,16.88,17.21,17.35,17.84,18.44,18.74,17.38,18.43,19.08,19.87,19.83,19.75,21.21,22.0,21.63,21.92,21.93,21.55,21.93,22.89,23.48,23.36,22.71,23.41,24.19,23.75,23.81,23.74,23.73,24.38,25.08,25.18,24.78,24.26,25.03,26.04,26.18,25.86,25.99,24.71,24.84,23.95,24.29,24.39,23.27,23.97,24.5,24.83,25.46,26.02,26.57,27.63,28.73,28.96,30.13,30.73,31.45,32.18,33.44,34.97,35.6,36.79,36.5,37.76,37.6,39.78,42.69,42.43,44.34,42.11,44.95,45.37,44.15,44.43,47.49,48.05,46.54,46.27,48.78,48.49,46.84,46.24,45.76,46.44,45.43,43.47,44.03,45.05,46.78,47.55,48.51,45.84,43.98,41.24,40.35,40.33,41.12,41.26,42.11,42.34,43.7,44.75,45.98,47.7,48.96,50.95,52.5,53.49,55.62,54.77,56.16,57.1,57.96,57.46,59.74,59.4,57.05,57.0,57.23,59.06,58.03,55.78,55.02,55.73,55.22,57.26,55.84,56.51,54.81,53.73,55.47,56.8,59.72,62.17,64.12,65.83,66.5,65.62,65.44,67.79,67.26,68.0,71.08,71.74,69.07,70.22,70.29,68.05,62.99,55.63,56.97,58.52,58.0,56.17,60.04,62.64,65.06,65.92,65.67,68.76,70.14,70.11,69.07,70.98,72.85,73.03,72.62,74.17,76.45,77.39,78.8,79.94,80.72,80.24,83.22,82.0,83.41,84.85,85.44,83.96,86.12,86.75,86.83,87.97,89.28,85.04,84.91,86.49,89.38,91.39,92.15,91.73,93.32,92.69,88.88,91.6,86.78,86.06,85.84,80.65,77.81,77.13,80.99,81.33,84.45,87.36,89.42,90.96,92.59,91.43,93.01,94.49,95.81,95.66,92.66,95.3,95.04,90.75,89.09,95.67,97.87,100.5,100.3,98.11,101.3,103.8,105.4,106.5,102.0,101.5,99.3,101.3,104.6,99.14,94.71,94.18,94.51,95.52,96.21,91.11,90.31,87.16,88.65,85.95,76.06,75.59,75.72,77.92,82.58,84.37,84.28,90.05,93.49,97.11,99.6,103.0,101.6,99.72,99.0,97.24,99.4,97.29,92.78,99.17,103.3,105.2,107.7,108.8,107.7,108.0,107.2,111.0,109.4,109.6,115.1,117.5,118.4,114.2,112.4,110.3,107.2,104.8,105.8,103.8,105.6,109.8,102.0,94.78,96.11,93.45,97.44,92.46,89.67,89.79,79.31,76.03,68.12,69.44,71.74,67.07,72.56,80.1,83.78,84.72,90.1,92.4,92.49,85.71,84.67,88.57,90.07,88.7,96.86,100.6,101.1,101.9,101.2,101.8,104.2,103.3,105.5,101.9,101.2,104.7,103.8,101.0,100.6,99.05,98.76,99.29,100.2,97.75,96.23,93.74,94.28,93.82,90.25,88.98,88.82,92.71,97.41,97.66,97.19,103.9,103.9,100.6,94.71,96.11,99.71,98.23,100.1,102.1,99.73,101.7,102.7,107.4,108.6,104.5,103.7,107.8,110.9,115.3,104.7,103.0,107.7,114.6,119.8,123.5,126.5,130.2,135.7,133.5,133.0,128.4,133.2,134.4,131.7,132.3,129.1,129.6,118.3,119.8,122.9,123.8,117.3,114.5,110.8,116.3,116.4,109.7,109.4,109.7,122.4,132.7,138.1,139.4,144.3,146.8,151.9,157.7,164.1,166.4,167.0,162.4,167.2,167.7,165.2,164.4,166.4,157.3,157.4,157.6,156.6,153.1,151.1,164.4,166.1,164.8,166.3,164.5,171.6,180.9,179.4,180.6,184.9,188.9,192.5,188.3,184.1,186.2,197.5,207.3,208.2,219.4,232.3,238.0,238.5,245.3,240.2,245.0,238.3,237.4,245.1,248.6,264.5,280.9,292.5,289.3,289.1,301.4,310.1,329.4,318.7,280.2,245.0,241.0,250.5,258.1,265.7,262.6,256.1,270.7,269.1,263.7,268.0,277.4,271.0,276.5,285.4,294.0,292.7,302.3,313.9,323.7,331.9,346.6,347.3,347.4,340.2,348.6,339.97,330.45,338.46,338.18,350.25,360.39,360.03,330.75,315.41,307.12,315.29,328.75,325.49,362.26,372.28,379.68,377.99,378.29,380.23,389.4,387.2,386.88,385.92,388.51,416.08,412.56,407.36,407.41,414.81,408.27,415.05,417.93,418.48,412.5,422.84,435.64,435.23,441.7,450.16,443.08,445.25,448.06,447.29,454.13,459.24,463.9,462.89,465.95,472.99,471.58,463.81,447.23,450.9,454.83,451.4,464.24,466.96,463.81,461.01,455.19,465.25,481.92,493.15,507.91,523.81,539.35,557.37,559.11,578.77,582.92,595.53,614.57,614.42,649.54,647.07,647.17,661.23,668.5,644.07,662.68,674.88,701.46,735.67,743.25,766.22,798.39,792.16,763.93,833.09,876.29,925.29,927.24,937.02,951.16,938.92,962.37,963.36,1023.74,1076.83,1112.2,1108.42,1108.39,1156.58,1074.62,1020.64,1032.47,1144.43,1190.05,1248.77,1246.58,1281.66,1334.76,1332.07,1322.55,1380.99,1327.49,1318.17,1300.01,1391.0,1428.68,1425.59,1388.87,1442.21,1461.36,1418.48,1461.96,1473.0,1485.46,1468.05,1390.14,1378.04,1330.93,1335.63,1305.75,1185.85,1189.84,1270.37,1238.71,1204.45,1178.5,1044.64,1076.59,1129.68,1144.93,1140.21,1100.67,1153.79,1111.93,1079.25,1014.02,903.59,912.55,867.81,854.63,909.93,899.18,895.84,837.03,846.63,890.03,935.96,988.0,992.54,989.53,1019.44,1038.73,1049.9,1080.64,1132.52,1143.36,1123.98,1133.36,1102.78,1132.76,1105.85,1088.94,1117.66,1117.21,1168.94,1199.21,1181.41,1199.63,1194.9,1164.43,1178.28,1202.25,1222.24,1224.27,1225.92,1191.96,1237.37,1262.07,1278.73,1276.65,1293.74,1302.17,1290.01,1253.17,1260.24,1287.15,1317.74,1363.38,1388.64,1416.42,1424.16,1444.8,1406.95,1463.64,1511.14,1514.19,1520.71,1454.62,1497.12,1539.66,1463.39,1479.22,1378.76,1354.87,1316.94,1370.47,1403.22,1341.25,1257.33,1281.47,1216.95,968.8,883.04,877.56,865.58,805.23,757.13,848.15,902.41,926.12,935.82,1009.73,1044.55,1067.66,1088.07,1110.38,1123.58,1089.16,1152.05,1197.32,1125.06,1083.36,1079.8,1087.28,1122.08,1171.58,1198.89,1241.53,1282.62,1321.12,1304.49,1331.51,1338.31,1287.29,1325.19,1185.31,1173.88,1207.22,1226.42,1243.32,1300.58,1352.49,1389.24,1386.43,1341.27,1323.48,1359.78,1403.45,1443.42,1437.82,1394.51,1422.29,1480.4,1512.31,1550.83,1570.7,1639.84,1618.77,1668.68,1670.09,1687.17,1720.03,1783.54,1807.78,1822.36,1817.04,1863.52,1864.26,1889.77,1947.09,1973.1,1961.53,1993.23,1937.27,2044.57,2054.27,2028.18,2082.2,2079.99,2094.86,2111.94,2099.29,2094.14,2039.87,1944.41,2024.81,2080.62,2054.08,1918.6,1904.42,2021.95,2075.54,2065.55,2083.89,2148.9,2170.95,2157.69,2143.02,2164.99,2246.63,2275.12,2329.91,2366.82,2359.31,2395.35,2433.99,2454.1,2456.22,2492.84,2557.0,2593.61,2664.34,2789.8,2705.16,2702.77,2653.63,2701.49,2754.35,2793.64,2857.82,2901.5,2785.46,2723.23,2567.31,2607.39,2754.86,2803.98,2903.8,2854.71,2890.17,2996.11,2897.5,2982.16,2977.68,3104.9,3176.75,3278.2,3277.31,2652.39,2761.98,2919.61,3104.66,3207.62,3391.71,3365.52,3418.7,3548.99,3695.31,3793.75,3883.43,3910.51,4141.18,4167.85,4238.49,4363.71,4454.21,4445.54,4460.71,4667.39,4674.77,4573.82,4435.98,4391.27,4391.3,4040.36,3898.95,3911.73,4158.56,3850.52,3726.05,3917.49,3912.38,3960.66,4079.68,3968.56,4121.47,4146.17,4345.37,4508.08,4457.36,4515.77,4269.4,4460.06,4685.05,4804.49,5011.96,5170.57,5112.49,5235.23,5415.14,5538.0,5478.21,5621.26,5792.32,5929.92,6010.91,5979.52,6038.69,5683.98,5369.5,5810.92,6029.95,6296.5,6408.95,6584.02,6735.69,6740.89,6853.03,6929.12,6919.47,6654.42,6957.01,7412.55,7450.03,7481.34,7711.32,7669.41];
+(function(){
+  const $ = id => document.getElementById(id);
+  const N = PX.length;
+  const label = i => { const m = (START[1]-1+i), y = START[0]+Math.floor(m/12); return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m%12]+" "+y; };
+  const yearOf = i => START[0]+Math.floor((START[1]-1+i)/12);
+  const idxOf = (y,mo) => (y-START[0])*12 + (mo-START[1]);
+  const lastYear = yearOf(N-1);
+  const gbp = v => "£" + Math.round(v).toLocaleString("en-GB");
+  const pct = v => (v>=0?"+":"−") + Math.abs(v*100).toFixed(1) + "%";
+
+  for (let y=START[0]+1; y<=lastYear; y++){
+    $("startY").add(new Option(y, y)); $("endY").add(new Option(y, y));
+  }
+  $("startY").value = 2016; $("endY").value = lastYear;
+
+  function run(){
+    let sy = +$("startY").value, ey = +$("endY").value;
+    if (ey <= sy) { ey = Math.min(lastYear, sy+1); $("endY").value = ey; }
+    const w = +$("win").value, cash = Math.max(0, +$("cash").value||0)/100/12, cost = Math.max(0, +$("cost").value||0)/100;
+    $("winOut").textContent = w + " months";
+    const s = Math.max(w, idxOf(sy,1)), e = Math.min(N-1, idxOf(ey,12));
+    // moving average up to and including month t
+    const ma = new Array(N).fill(null); let sum = 0;
+    for (let t=0;t<N;t++){ sum += PX[t]; if (t>=w) sum -= PX[t-w]; if (t>=w-1) ma[t] = sum/w; }
+    let hold = 10000, strat = 10000, pos = PX[s] > ma[s], trades = pos ? 1 : 0, months = 0, inMkt = 0;
+    if (pos) strat *= (1-cost);
+    const H=[hold], S=[strat], IN=[pos];
+    let missedUp = 0, missedCount = 0;
+    for (let t=s; t<e; t++){
+      const r = PX[t+1]/PX[t]-1;
+      hold *= 1+r;
+      if (pos){ strat *= 1+r; inMkt++; } else { strat *= 1+cash; if (r>0){ missedUp += r; missedCount++; } }
+      months++;
+      const next = PX[t+1] > ma[t+1];
+      if (t+1<e && next !== pos){ strat *= (1-cost); trades++; pos = next; }
+      H.push(hold); S.push(strat); IN.push(pos);
+    }
+    const yrs = months/12;
+    const cagr = v => Math.pow(v/10000, 1/yrs) - 1;
+    const mdd = arr => { let pk=arr[0], d=0; for (const v of arr){ pk=Math.max(pk,v); d=Math.min(d,v/pk-1); } return d; };
+    const win = strat > hold;
+    $("verdict").innerHTML = (win ? "The moving average won this period." : "Buy and hold won this period.") ;
+    $("sub").textContent = "£10,000 invested from " + label(s) + " to " + label(e) + " (" + yrs.toFixed(1) + " years) grew to " + gbp(hold) + " with buy and hold, and " + gbp(strat) + " with a " + w + "-month moving average.";
+    const rows = [
+      ["Final value: buy and hold", gbp(hold)],
+      ["Final value: moving average", gbp(strat)],
+      ["Yearly return: buy and hold", pct(cagr(hold))],
+      ["Yearly return: moving average", pct(cagr(strat))],
+      ["Worst fall: buy and hold", pct(mdd(H))],
+      ["Worst fall: moving average", pct(mdd(S))],
+      ["Trades made by the strategy", trades.toString()],
+      ["Time invested", Math.round(inMkt/Math.max(1,months)*100) + "% of months"],
+      ["Rising months missed while out", missedCount + (missedCount===1?" month":" months")],
+      ["Difference at the end", (win?"Strategy ahead by ":"Buy and hold ahead by ") + gbp(Math.abs(strat-hold))]
+    ];
+    $("stats").innerHTML = rows.map(r => '<div class="stat"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join("");
+    draw(s, H, S, IN);
+  }
+
+  let cache = null;
+  function draw(s, H, S, IN){
+    const W=860, Ht=360, L=62, R=14, T=12, B=34, n=H.length;
+    const log = $("logScale").checked;
+    const all = H.concat(S); let lo = Math.min(...all), hi = Math.max(...all);
+    const f = v => log ? Math.log(v) : v;
+    let flo = f(lo), fhi = f(hi); const pad = (fhi-flo)*0.06 || 1; flo -= pad; fhi += pad;
+    const x = i => L + (n<=1?0:i*(W-L-R)/(n-1));
+    const y = v => T + (1-(f(v)-flo)/(fhi-flo))*(Ht-T-B);
+    let svg = "";
+    // out-of-market bands
+    for (let i=0;i<n-1;i++){ if (!IN[i]) svg += '<rect x="'+x(i).toFixed(1)+'" y="'+T+'" width="'+(x(i+1)-x(i)+0.5).toFixed(1)+'" height="'+(Ht-T-B)+'" fill="var(--out)"/>'; }
+    // gridlines
+    const ticks = 5;
+    for (let k=0;k<=ticks;k++){
+      const fv = flo + (fhi-flo)*k/ticks, v = log ? Math.exp(fv) : fv, yy = y(v);
+      svg += '<line x1="'+L+'" x2="'+(W-R)+'" y1="'+yy.toFixed(1)+'" y2="'+yy.toFixed(1)+'" stroke="var(--line)"/>';
+      svg += '<text x="'+(L-8)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end" font-size="12" fill="var(--muted)">'+short(v)+'</text>';
+    }
+    // x labels
+    const step = Math.max(1, Math.round(n/6));
+    for (let i=0;i<n;i+=step){ svg += '<text x="'+x(i).toFixed(1)+'" y="'+(Ht-10)+'" text-anchor="middle" font-size="12" fill="var(--muted)">'+label(s+i)+'</text>'; }
+    const path = arr => arr.map((v,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)).join(" ");
+    svg += '<path d="'+path(H)+'" fill="none" stroke="var(--hold)" stroke-width="2.2" stroke-linejoin="round"/>';
+    svg += '<path d="'+path(S)+'" fill="none" stroke="var(--ma)" stroke-width="2.2" stroke-linejoin="round"/>';
+    svg += '<line id="cursor" x1="0" x2="0" y1="'+T+'" y2="'+(Ht-B)+'" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/>';
+    $("chart").innerHTML = svg;
+    cache = {s,H,S,IN,x,W,L,R,n};
+  }
+  function short(v){ return v>=1e6 ? "£"+(v/1e6).toFixed(v>=1e7?0:1)+"m" : v>=1e3 ? "£"+(v/1e3).toFixed(v>=1e4?0:1)+"k" : "£"+Math.round(v); }
+
+  function hover(ev){
+    if (!cache) return;
+    const svg = $("chart"), rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (cache.W / rect.width);
+    let i = Math.round((px - cache.L) / ((cache.W - cache.L - cache.R)/(cache.n-1)));
+    i = Math.max(0, Math.min(cache.n-1, i));
+    const cx = cache.x(i), cur = $("cursor");
+    cur.setAttribute("x1", cx); cur.setAttribute("x2", cx); cur.setAttribute("visibility","visible");
+    const tip = $("tip");
+    tip.innerHTML = label(cache.s+i) + "<br>Buy and hold: " + gbp(cache.H[i]) + "<br>Strategy: " + gbp(cache.S[i]) + (cache.IN[i] ? "" : " (in cash)");
+    tip.style.display = "block";
+    tip.style.left = (cx / cache.W * rect.width) + "px";
+    tip.style.top = (ev.clientY - rect.top) + "px";
+  }
+  function leave(){ $("tip").style.display="none"; const c=$("cursor"); if (c) c.setAttribute("visibility","hidden"); }
+  $("chart").addEventListener("pointermove", hover);
+  $("chart").addEventListener("pointerleave", leave);
+
+  function clearPresets(){ document.querySelectorAll(".presets button").forEach(b=>b.setAttribute("aria-pressed","false")); }
+  document.querySelectorAll(".presets button").forEach(b => b.addEventListener("click", () => {
+    const [a,z] = b.dataset.p.split(",").map(Number);
+    $("startY").value = Math.max(START[0]+1, a); $("endY").value = Math.min(lastYear, z);
+    clearPresets(); b.setAttribute("aria-pressed","true"); run();
+  }));
+  ["startY","endY"].forEach(id => $(id).addEventListener("change", () => { clearPresets(); run(); }));
+  ["win","cash","cost"].forEach(id => $(id).addEventListener("input", run));
+  $("logScale").addEventListener("change", run);
+  run();
+})();
+</script>
+</body>
+</html>
